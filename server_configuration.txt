@@ -1,0 +1,3 @@
+Server Host Name: localhost
+Server Port: 12452
+Server Banned Phrases List: fuck fck f4u fucku shit
