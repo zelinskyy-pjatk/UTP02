@@ -3,7 +3,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.net.UnknownHostException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class Client {
    // -- Client Communication Streams -- //
@@ -11,71 +12,85 @@ public class Client {
    private static BufferedReader in = null;
    private static BufferedReader stdIn = null;
 
-   // -- Server Hostname -- //
-   private static String hostname = "localhost";
+   // -- Server Hostname and Port -- //
+   private static String hostname;
+   private static int port;
+
    // -- Client Name -- //
    private static String clientName;
 
+   // -- Executor Service (Thread Pool) -- //
+   private static ExecutorService threadPool;
 
-   //TODO: -- MAIN METHOD -- //
    public static void main(String[] args) throws IOException {
-      /// NAMES
-      if(args.length == 0) throw new IOException("You should specify your client's name as argument (e.g. java Client NICKNAME)!");
-      else if(args.length == 1) clientName = args[0];
+      if(args.length == 0) throw new IOException("You should specify your client's name as argument (e.g. java Client NICKNAME) OR your client's name, hostname, and port number as argument (e.g. java Client NICKNAME HOSTNAME PORT_NUMBER");
+      else if(args.length == 1) {
+         clientName = args[0];
+         hostname = "192.168.0.171"; // -- Default Hostname of our Server -- //
+         port = 12451; // -- Default Port of our Server -- //
+      }
+      else if(args.length == 3) {
+         clientName = args[0];
+         hostname = args[1];
+         try {
+            port = Integer.parseInt(args[2]);
+         } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Port number must be a valid integer.");
+         }
+      } else {
+         throw new IllegalArgumentException("Invalid arguments! Provide the client's name (required) and optionally hostname and port (e.g., java Client NICKNAME or java Client NICKNAME HOSTNAME PORT_NUMBER).");
+      }
 
-      //TODO: CONNECTING
       System.out.println("Trying to connect to " + hostname);
-      try (Socket socket = new Socket(hostname, 12452)) {
-         System.out.println("Creating communication streams");
+      threadPool = Executors.newCachedThreadPool();
+
+      try (Socket socket = new Socket(hostname, port)) {
          out = new PrintWriter(socket.getOutputStream(), true);
          in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+         stdIn = new BufferedReader(new InputStreamReader(System.in));
 
-         Thread listenerThread = new Thread(() -> {
-            try{
-               String serverMessage;
-               while((serverMessage = in.readLine()) != null) {
-                  System.out.println(serverMessage);
+         // -- Send client name to server -- //
+         out.println(clientName);
+
+         // -- Start a thread for listening to incoming messages -- //
+         threadPool.submit(() -> {
+            try {
+               String serverMsg;
+               while ((serverMsg = in.readLine()) != null) {
+                  System.out.println(serverMsg);
                }
-            }catch (IOException e) {
-               System.out.println("Disconnected from the server.");
+            } catch (IOException e) {
+               System.err.println("Disconnected from server.");
             }
          });
 
-         listenerThread.setDaemon(true);
-         listenerThread.start();
-
-
-         out.println(clientName); // WE ARE SENDING NAME AND PORT INFO IMMIDIATELY AFTER CONNECTING
-
-         //TODO: USER INPUT
+         // -- Sending User Input Messages -- //
          String userInput;
-         // -- Buffered Reader for Keyboard (read entered message) -- //
-         stdIn = new BufferedReader(new InputStreamReader(System.in));
-
          while ((userInput = stdIn.readLine()) != null) {
-            if(userInput.equalsIgnoreCase("/exit")) {
-               System.out.println("Disconnecting from the server...");
+            if(userInput.trim().isEmpty()){
+               System.out.println("Empty messages are not allowed.");
+               continue;
+            }
+            if (userInput.equalsIgnoreCase("/exit")) {
+               out.println("/exit");
                break;
-            };
-            // send to the server
-            out.println(userInput);
-            // read the response and print it out
-            System.out.println("echo: " + in.readLine());
+            }
+            out.println(userInput.trim());
          }
-
-         socket.close();
-         System.out.println("Connection closed.");
-      } catch (UnknownHostException e) {
-         System.err.println("Error occurred! Unknown hostname: " + hostname + ".");
-         System.exit(-606);   // -606 -> indicates some error while connecting to server (with hostname)
       } catch (IOException e) {
-         System.err.println("Error occurred! Unable to connect to: " + hostname + ".");
-         System.exit(-606);
+         System.err.println("Error connecting to server: " + e.getMessage());
+      } finally {
+         try {
+            // -- Shutdown Thread Pool -- //
+            if(threadPool != null && !threadPool.isShutdown()) threadPool.shutdown();
+            // -- Close All Communication and Reading Streams -- //
+            if(stdIn != null) stdIn.close();
+            if(out != null) out.close();
+            if(in != null) in.close();
+         } catch (IOException e) {
+            System.err.println(e.getMessage());
+            System.err.println("Error closing input stream: " + e.getMessage());
+         }
       }
-
-      // -- Close All Communication and Reading Streams -- //
-      stdIn.close();
-      out.close();
-      in.close();
    }
 }
